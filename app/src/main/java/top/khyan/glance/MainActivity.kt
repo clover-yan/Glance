@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,6 +55,9 @@ import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import top.khyan.glance.notifications.Glimpse
 import top.khyan.glance.notifications.GlimpseStore
 import top.khyan.glance.notifications.LiveUpdateDeletedReceiver
@@ -391,8 +395,31 @@ fun ScheduleScreen(modifier: Modifier = Modifier) {
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    var statusMessage by rememberSaveable { mutableStateOf("") }
     val manager = remember(context) { LiveUpdateNotificationManager(context) }
+    var statusMessage by rememberSaveable { mutableStateOf("") }
+
+    var canPostPromotedLiveUpdates by remember {
+        mutableStateOf(manager.canPostPromotedLiveUpdates())
+    }
+    val powerManager =
+        remember(context) { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
+    var isIgnoringBatteryOptimizations by remember {
+        mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
+    }
+
+    // Refresh battery optimization status when the screen resumes (user returns from system settings)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                canPostPromotedLiveUpdates = manager.canPostPromotedLiveUpdates()
+                isIgnoringBatteryOptimizations =
+                    powerManager.isIgnoringBatteryOptimizations(context.packageName)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Column(modifier = modifier) {
         ScreenSection(
@@ -403,8 +430,28 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
         Column(
             modifier = Modifier.padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // ── 通知设置 ──────────────────────────────────────
+            Text(
+                text = "实时更新通知设置",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = if (canPostPromotedLiveUpdates) "可以发布实时更新通知"
+                else "无法发布实时更新通知",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (canPostPromotedLiveUpdates)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.error
+            )
+            Text(
+                text = "授予权限并允许发布实时更新通知，以确保 Glance 能在锁屏和系统界面展示重要信息。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Button(
                 onClick = {
                     val started = runCatching {
@@ -416,22 +463,79 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         } catch (e: ActivityNotFoundException) {
                             context.startActivity(
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                }
-                            } else {
-                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                    data = Uri.fromParts("package", context.packageName, null)
-                                }
-                            }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    }
+                                } else {
+                                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                        data = Uri.fromParts("package", context.packageName, null)
+                                    }
+                                }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
                     }.isSuccess
-                    statusMessage =
-                        if (started) "已打开通知设置" else "无法打开系统设置，请手动前往应用通知设置"
+                    if (!started) {
+                        statusMessage = "无法打开系统设置，请手动前往应用通知设置"
+                    }
                 }
             ) {
-                Text("打开实时更新系统设置")
+                Text("打开通知设置")
             }
+
+            HorizontalDivider()
+
+            // ── 电池优化 ──────────────────────────────────────
+            Text(
+                text = "电池优化",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = if (isIgnoringBatteryOptimizations) "已忽略电池优化"
+                else "受电池优化限制",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isIgnoringBatteryOptimizations)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.error
+            )
+            Text(
+                text = "忽略电池优化可确保实时更新通知和日程提醒在后台正常工作，不受系统限制。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = {
+                    val started = runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                            }
+                        )
+                    }.isSuccess
+                    if (!started) {
+                        statusMessage = "无法打开电池优化设置，请手动前往系统设置"
+                    }
+                },
+                enabled = !isIgnoringBatteryOptimizations
+            ) {
+                Text(if (isIgnoringBatteryOptimizations) "已忽略电池优化" else "请求忽略电池优化")
+            }
+            TextButton(
+                onClick = {
+                    val started = runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }.isSuccess
+                    if (!started) {
+                        statusMessage = "无法打开电池优化设置，请手动前往系统设置"
+                    }
+                }
+            ) {
+                Text("打开电池优化设置")
+            }
+
             if (statusMessage.isNotBlank()) {
                 Text(
                     text = statusMessage,
