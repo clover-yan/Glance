@@ -18,7 +18,7 @@ class LiveUpdateDeletedReceiver : BroadcastReceiver() {
         GlimpseStore(context).delete(notificationId)
 
         // Notify in-app UI to refresh immediately when it is visible.
-        context.sendBroadcast(Intent(ACTION_GLIMPSE_STORE_CHANGED))
+        context.sendBroadcast(Intent(ACTION_GLIMPSE_STORE_CHANGED).setPackage(context.packageName))
     }
 
     companion object {

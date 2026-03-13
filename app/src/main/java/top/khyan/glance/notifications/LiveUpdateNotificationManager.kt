@@ -1,17 +1,17 @@
 package top.khyan.glance.notifications
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -29,51 +29,11 @@ class LiveUpdateNotificationManager(
 
     private val appContext = context.applicationContext
 
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     fun createLiveUpdate(
         notificationId: Int,
         content: LiveUpdateContent,
         tag: String? = null,
-    ): Boolean {
-        return postLiveUpdate(notificationId = notificationId, content = content, tag = tag)
-    }
-
-    fun cancelLiveUpdate(notificationId: Int, tag: String? = null) {
-        if (tag == null) {
-            NotificationManagerCompat.from(appContext).cancel(notificationId)
-        } else {
-            NotificationManagerCompat.from(appContext).cancel(tag, notificationId)
-        }
-    }
-
-    /**
-     * Whether app-level promoted notifications are allowed by current system/user settings.
-     */
-    fun canPostPromotedLiveUpdates(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) {
-            return false
-        }
-        val manager = appContext.getSystemService(NotificationManager::class.java)
-        return manager.canPostPromotedNotifications()
-    }
-
-    /**
-     * Intent to open app-specific promoted notification settings on Android 16+.
-     */
-    fun buildPromotedSettingsIntent(): Intent {
-        val promotedIntent = Intent(ACTION_MANAGE_APP_PROMOTED_NOTIFICATIONS).apply {
-            data = Uri.fromParts("package", appContext.packageName, null)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA && canResolve(promotedIntent)) {
-            return promotedIntent
-        }
-        return buildAppNotificationSettingsIntent()
-    }
-
-    private fun postLiveUpdate(
-        notificationId: Int,
-        content: LiveUpdateContent,
-        tag: String?,
     ): Boolean {
         if (!canPostNotifications()) {
             return false
@@ -100,6 +60,26 @@ class LiveUpdateNotificationManager(
         return true
     }
 
+    fun cancelLiveUpdate(notificationId: Int, tag: String? = null) {
+        if (tag == null) {
+            NotificationManagerCompat.from(appContext).cancel(notificationId)
+        } else {
+            NotificationManagerCompat.from(appContext).cancel(tag, notificationId)
+        }
+    }
+
+    /**
+     * Whether app-level promoted notifications are allowed by current system/user settings.
+     */
+    fun canPostPromotedLiveUpdates(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) {
+            return false
+        }
+        val manager = appContext.getSystemService(NotificationManager::class.java)
+        return manager.canPostPromotedNotifications()
+    }
+
+    @SuppressLint("InlinedApi")
     @RequiresApi(Build.VERSION_CODES.BAKLAVA)
     private fun buildPlatformLiveUpdateNotification(content: LiveUpdateContent): Notification {
         val extras = Bundle().apply {
@@ -207,23 +187,6 @@ class LiveUpdateNotificationManager(
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildAppNotificationSettingsIntent(): Intent {
-        val appSettingsIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                putExtra(Settings.EXTRA_APP_PACKAGE, appContext.packageName)
-            }
-        } else {
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", appContext.packageName, null)
-            }
-        }
-        return appSettingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-
-    private fun canResolve(intent: Intent): Boolean {
-        return intent.resolveActivity(appContext.packageManager) != null
-    }
-
     private fun buildDeleteIntent(notificationId: Int): PendingIntent {
         val intent = Intent(appContext, LiveUpdateDeletedReceiver::class.java).apply {
             action = LiveUpdateDeletedReceiver.ACTION_LIVE_UPDATE_DISMISSED
@@ -239,7 +202,7 @@ class LiveUpdateNotificationManager(
 
     companion object {
         const val DEFAULT_CHANNEL_ID: String = "live_updates"
-        private const val ACTION_MANAGE_APP_PROMOTED_NOTIFICATIONS: String =
+        const val ACTION_MANAGE_APP_PROMOTED_NOTIFICATIONS: String =
             "android.settings.MANAGE_APP_PROMOTED_NOTIFICATIONS"
     }
 }
@@ -254,7 +217,7 @@ data class LiveUpdateContent(
     val whenTimeMillis: Long? = null,
     val useChronometer: Boolean = false,
     val chronometerCountDown: Boolean = false,
-    val contentIntent: android.app.PendingIntent? = null,
-    val deleteIntent: android.app.PendingIntent? = null,
+    val contentIntent: PendingIntent? = null,
+    val deleteIntent: PendingIntent? = null,
 )
 

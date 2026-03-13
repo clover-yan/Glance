@@ -1,18 +1,22 @@
 package top.khyan.glance
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresPermission
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,14 +50,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import top.khyan.glance.notifications.Glimpse
 import top.khyan.glance.notifications.GlimpseStore
 import top.khyan.glance.notifications.LiveUpdateDeletedReceiver
 import top.khyan.glance.notifications.LiveUpdateNotificationManager
+import top.khyan.glance.notifications.LiveUpdateNotificationManager.Companion.ACTION_MANAGE_APP_PROMOTED_NOTIFICATIONS
 import top.khyan.glance.ui.theme.GlanceTheme
 
 class MainActivity : ComponentActivity() {
+    @RequiresPermission(Manifest.permission.POST_NOTIFICATIONS)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -161,11 +168,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             }
         }
         val filter = IntentFilter(LiveUpdateDeletedReceiver.ACTION_GLIMPSE_STORE_CHANGED)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            context.registerReceiver(receiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         onDispose {
             context.unregisterReceiver(receiver)
@@ -252,10 +260,15 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                                 text = liveText,
                                 progress = progressValue.toInt(),
                             )
-                            val posted = manager.createLiveUpdate(
-                                notificationId = id,
-                                content = glimpse.toLiveUpdateContent(),
-                            )
+                            val posted = if (ActivityCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.POST_NOTIFICATIONS
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) false else
+                                manager.createLiveUpdate(
+                                    notificationId = id,
+                                    content = glimpse.toLiveUpdateContent(),
+                                )
                             if (posted) {
                                 store.save(glimpse)
                                 statusMessage = "已创建实时更新通知 #$id"
@@ -384,12 +397,33 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             subtitle = "应用与偏好配置",
             body = "这里可以调整个性化的选项。",
         )
-        Column(modifier = Modifier.padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TextButton(
+        Column(
+            modifier = Modifier.padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Button(
                 onClick = {
-                    val intent = manager.buildPromotedSettingsIntent()
-                    val started = runCatching { context.startActivity(intent) }.isSuccess
-                    statusMessage = if (started) "已打开通知设置" else "无法打开系统设置，请手动前往应用通知设置"
+                    val started = runCatching {
+                        try {
+                            context.startActivity(Intent(ACTION_MANAGE_APP_PROMOTED_NOTIFICATIONS).apply {
+                                data = Uri.fromParts("package", context.packageName, null)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            })
+                        } catch (e: ActivityNotFoundException) {
+                            context.startActivity(
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                }
+                            } else {
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                            }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }.isSuccess
+                    statusMessage =
+                        if (started) "已打开通知设置" else "无法打开系统设置，请手动前往应用通知设置"
                 }
             ) {
                 Text("打开实时更新系统设置")
