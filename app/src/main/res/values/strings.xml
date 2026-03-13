@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Glance</string>
+    <string name="live_update_channel_name">Live Updates</string>
+    <string name="live_update_channel_description">Shows ongoing real-time updates and progress.</string>
+</resources>
